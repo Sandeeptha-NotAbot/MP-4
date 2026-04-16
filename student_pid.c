@@ -21,9 +21,17 @@ void studentPidInit(PidObject* pid, const float desired, const float kp,
              const float samplingRate, const float cutoffFreq,
              bool enableDFilter)
 {
-  //488 TODO initialize all the values in the PidObject struct
- 
-  //additional initialization for optional low pass filter
+  // initialize all the values in the PidObject struct
+  pid->kp = kp;
+  pid->ki = ki;
+  pid->kd = kd;
+  
+  pid->desired = desired;
+  pid->dt = dt;
+  pid->samplingRate = samplingRate;
+  pid->cutoffFreq = cutoffFreq;
+  
+  // additional initialization for optional low pass filter
   pid->enableDFilter = enableDFilter;
   if (pid->enableDFilter)
   {
