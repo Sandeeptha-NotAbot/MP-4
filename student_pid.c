@@ -21,17 +21,22 @@ void studentPidInit(PidObject* pid, const float desired, const float kp,
              const float samplingRate, const float cutoffFreq,
              bool enableDFilter)
 {
-  // initialize all the values in the PidObject struct
+  pid->error = 0.0f;
+  pid->prevError = 0.0f;
+  pid->integ = 0.0f;
+  pid->deriv = 0.0f;
   pid->kp = kp;
   pid->ki = ki;
   pid->kd = kd;
-  
-  pid->desired = desired;
   pid->dt = dt;
-  pid->samplingRate = samplingRate;
-  pid->cutoffFreq = cutoffFreq;
-  
-  // additional initialization for optional low pass filter
+  pid->setpoint = desired;
+  pid->iLimit = DEFAULT_PID_INTEGRATION_LIMIT;
+  pid->outputLimit = DEFAULT_PID_OUTPUT_LIMIT;
+  pid->outP = 0.0f;
+  pid->outI = 0.0f;
+  pid->outD = 0.0f;
+ 
+  //additional initialization for optional low pass filter
   pid->enableDFilter = enableDFilter;
   if (pid->enableDFilter)
   {
@@ -50,29 +55,48 @@ void studentPidInit(PidObject* pid, const float desired, const float kp,
  */
 float studentPidUpdate(PidObject* pid, const float measured, const bool updateError)
 {
+  // calculate error unless caller already set it manually
+  if (updateError) {
+    studentPidSetError(pid, pid->setpoint - measured);
+  }
 
-  // 488 TODO write base PID algorithm
+  // accumulate integral, clamp to prevent windup
+  pid->integ += pid->error * pid->dt;
+  if (pid->iLimit != 0.0f) {
+    pid->integ = constrain(pid->integ, -pid->iLimit, pid->iLimit);
+  }
 
-    // 488 TODO optionally enable derivative low pass filtering
-    /*
-    if (pid->enableDFilter)
-    {
-      pid->deriv = lpf2pApply(&pid->dFilter, deriv);
-      if (isnan(pid->deriv)) {
-        pid->deriv = 0;
-      }
-    } else {
-      pid->deriv = deriv;
+  // filter if enabled to reduce noise sensitivity
+  float deriv = 0.0f;
+  if (pid->dt > 0.0f) {
+    deriv = (pid->error - pid->prevError) / pid->dt;
+  }
+
+  if (pid->enableDFilter)
+  {
+    pid->deriv = lpf2pApply(&pid->dFilter, deriv);
+    if (isnan(pid->deriv)) {
+      pid->deriv = 0.0f;
     }
-    */
+  } else {
+    pid->deriv = deriv;
+  }
 
+  // store individual terms for GUI logging
+  pid->outP = pid->kp * pid->error;
+  pid->outI = pid->ki * pid->integ;
+  pid->outD = pid->kd * pid->deriv;
 
-    // 488 TODO Constrain the integral (unless the integral limit is zero), use the constrain function
-    
+  // clamp output if limit is set
+  float update = pid->outP + pid->outI + pid->outD;
+  if (pid->outputLimit != 0.0f) {
+    update = constrain(update, -pid->outputLimit, pid->outputLimit);
+  }
 
-    // 488 TODO Constrain the total PID output (unless the output Limit is zero)
+  // store error for next derivative calculation
+  pid->prevError = pid->error;
 
-    return 0.0;
+  return update;
 }
 
 /**
@@ -82,7 +106,7 @@ float studentPidUpdate(PidObject* pid, const float measured, const bool updateEr
  * @param[in] limit Pid integral swing limit.
  */
 void studentPidSetIntegralLimit(PidObject* pid, const float limit) {
-  // 488 TODO
+  pid->iLimit = fabsf(limit);
 }
 
 /**
@@ -92,7 +116,17 @@ void studentPidSetIntegralLimit(PidObject* pid, const float limit) {
  */
 void studentPidReset(PidObject* pid)
 {
-  // 488 TODO
+  pid->error = 0.0f;
+  pid->prevError = 0.0f;
+  pid->integ = 0.0f;
+  pid->deriv = 0.0f;
+  pid->outP = 0.0f;
+  pid->outI = 0.0f;
+  pid->outD = 0.0f;
+
+  if (pid->enableDFilter) {
+    lpf2pReset(&pid->dFilter, 0.0f);
+  }
 }
 
 /**
@@ -103,7 +137,7 @@ void studentPidReset(PidObject* pid)
  */
 void studentPidSetError(PidObject* pid, const float error)
 {
-  // 488 TODO
+  pid->error = error;
 }
 
 /**
@@ -114,7 +148,7 @@ void studentPidSetError(PidObject* pid, const float error)
  */
 void studentPidSetDesired(PidObject* pid, const float desired)
 {
-  // 488 TODO
+  pid->setpoint = desired;
 }
 
 /**
@@ -125,7 +159,7 @@ void studentPidSetDesired(PidObject* pid, const float desired)
  */
 float studentPidGetDesired(PidObject* pid)
 {
-  // 488 TODO
+  return pid->setpoint;
 }
 
 
@@ -135,8 +169,9 @@ float studentPidGetDesired(PidObject* pid)
  */
 bool studentPidIsActive(PidObject* pid)
 {
-  //488 TODO is active if the constants kp ki kd are above some small threshold
-  return false;
+  return fabsf(pid->kp) > FLT_EPSILON ||
+         fabsf(pid->ki) > FLT_EPSILON ||
+         fabsf(pid->kd) > FLT_EPSILON;
 }
 
 /**
@@ -147,7 +182,7 @@ bool studentPidIsActive(PidObject* pid)
  */
 void studentPidSetKp(PidObject* pid, const float kp)
 {
-  // 488 TODO
+  pid->kp = kp;
 }
 
 /**
@@ -158,7 +193,7 @@ void studentPidSetKp(PidObject* pid, const float kp)
  */
 void studentPidSetKi(PidObject* pid, const float ki)
 {
-  // 488 TODO
+  pid->ki = ki;
 }
 
 /**
@@ -169,7 +204,7 @@ void studentPidSetKi(PidObject* pid, const float ki)
  */
 void studentPidSetKd(PidObject* pid, const float kd)
 {
-  // 488 TODO
+  pid->kd = kd;
 }
 
 /**
@@ -179,5 +214,5 @@ void studentPidSetKd(PidObject* pid, const float kd)
  * @param[in] dt    Delta time
  */
 void studentPidSetDt(PidObject* pid, const float dt) {
-  // 488 TODO
+  pid->dt = dt;
 }

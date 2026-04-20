@@ -1,3 +1,4 @@
+
 #include "stabilizer.h"
 #include "stabilizer_types.h"
 
@@ -32,6 +33,9 @@ static float accelz;
 //Dummy variables for test stand
 static float angle;
 static float rate;
+static bool yawWasRateMode;
+static bool rollWasRateMode;  
+static bool pitchWasRateMode;
 
 void controllerStudentInit(void)
 {
@@ -55,8 +59,13 @@ bool controllerStudentTest(void)
  * @return float 
  */
 static float capAngle(float angle) {
-  //488 TODO 
-  return 0;
+  while (angle > 180.0f) {
+    angle -= 360.0f;
+  }
+  while (angle < -180.0f) {
+    angle += 360.0f;
+  }
+  return angle;
 }
 
 
@@ -93,36 +102,59 @@ void controllerStudent(control_t *control, setpoint_t *setpoint, const sensorDat
       return;
     }
 
-    // 488 TODO if yaw is in rate mode, move the yaw angle setpoint accordingly
+    if (setpoint->mode.yaw == modeVelocity) {
+      if (!yawWasRateMode) {
+        attitudeDesired.yaw = capAngle(state->attitude.yaw);
+      }
+      attitudeDesired.yaw = capAngle(attitudeDesired.yaw + setpoint->attitudeRate.yaw * STUDENT_UPDATE_DT);
+    } else {
+      attitudeDesired.yaw = capAngle(setpoint->attitude.yaw);
+    }
+    yawWasRateMode = (setpoint->mode.yaw == modeVelocity);
 
-    
-    // 488 TODO set desired attitude, roll, pitch, and yaw angles
+    attitudeDesired.roll = capAngle(setpoint->attitude.roll);
+    attitudeDesired.pitch = capAngle(setpoint->attitude.pitch);
+    thrustDesired = setpoint->thrust;
 
+    studentAttitudeControllerCorrectAttitudePID(
+      state->attitude.roll, state->attitude.pitch, state->attitude.yaw,
+      attitudeDesired.roll, attitudeDesired.pitch, attitudeDesired.yaw,
+      &rateDesired.roll, &rateDesired.pitch, &rateDesired.yaw);
 
-    // 488 TODO set desired thrust
+    if (setpoint->mode.roll == modeVelocity) {
+      rateDesired.roll = setpoint->attitudeRate.roll;
+      studentAttitudeControllerResetRollAttitudePID();
+    }
 
+    if (setpoint->mode.pitch == modeVelocity) {
+      rateDesired.pitch = setpoint->attitudeRate.pitch;
+      studentAttitudeControllerResetPitchAttitudePID();
+    }
 
+    if (setpoint->mode.yaw == modeVelocity) {
+      rateDesired.yaw = setpoint->attitudeRate.yaw;
+      // yawWasRateMode is already false on first entry, so reset fires exactly once
+    }
 
-    // 488 TODO Run the attitude controller update with the actual attitude and desired attitude
-    // outputs the desired attitude rates
-
-
-    // 488 TODO if velocity mode, overwrite rateDesired output
-    // from the attitude controller with the setpoint value
-    // Also reset the PID to avoid error buildup, which can lead to unstable
-    // behavior if level mode is engaged later
-
-    
-
-    // 488 TODO update the attitude rate PID, given the current angular rate 
-    // read by the gyro and the desired rate 
-
-
+    studentAttitudeControllerCorrectRatePID(
+      sensors->gyro.x, sensors->gyro.y, sensors->gyro.z,
+      rateDesired.roll, rateDesired.pitch, rateDesired.yaw,
+      &control->roll, &control->pitch, &control->yaw);
   }
 
-  //488 TODO set control->thrust 
+  control->thrust = thrustDesired;
 
-  //488 TODO if no thrust active, set all outputs to 0 and reset PID variables
+  if (control->thrust <= 0.0f) {
+    control->thrust = 0.0f;
+    control->roll = 0;
+    control->pitch = 0;
+    control->yaw = 0;
+    thrustDesired = 0.0f;
+    yawWasRateMode = false;
+    rollWasRateMode  = false;
+    pitchWasRateMode = false;
+    studentAttitudeControllerResetAllPID();
+  }
 
 
   //copy values for logging
@@ -142,64 +174,62 @@ void controllerStudent(control_t *control, setpoint_t *setpoint, const sensorDat
  */
 LOG_GROUP_START(ctrlStdnt)
 
-// 488 TODO setup logging parameters, replace null with pointer to globabl variable
-
 /**
  * @brief Thrust command output
  */
-LOG_ADD(LOG_FLOAT, cmd_thrust, NULL)
+LOG_ADD(LOG_FLOAT, cmd_thrust, &cmd_thrust)
 /**
  * @brief Roll command output
  */
-LOG_ADD(LOG_FLOAT, cmd_roll, NULL)
+LOG_ADD(LOG_FLOAT, cmd_roll, &cmd_roll)
 /**
  * @brief Pitch command output
  */
-LOG_ADD(LOG_FLOAT, cmd_pitch, NULL)
+LOG_ADD(LOG_FLOAT, cmd_pitch, &cmd_pitch)
 /**
  * @brief yaw command output
  */
-LOG_ADD(LOG_FLOAT, cmd_yaw, NULL)
+LOG_ADD(LOG_FLOAT, cmd_yaw, &cmd_yaw)
 /**
  * @brief Gyro roll measurement in degrees
  */
-LOG_ADD(LOG_FLOAT, r_roll, NULL)
+LOG_ADD(LOG_FLOAT, r_roll, &r_roll)
 /**
  * @brief Gyro pitch measurement in degrees
  */
-LOG_ADD(LOG_FLOAT, r_pitch, NULL)
+LOG_ADD(LOG_FLOAT, r_pitch, &r_pitch)
 /**
  * @brief Gyro yaw rate measurement in degrees
  */
-LOG_ADD(LOG_FLOAT, r_yaw, NULL)
+LOG_ADD(LOG_FLOAT, r_yaw, &r_yaw)
 /**
  * @brief Acceleration in the z axis in G-force
  */
-LOG_ADD(LOG_FLOAT, accelz, NULL)
+LOG_ADD(LOG_FLOAT, accelz, &accelz)
 /**
  * @brief Desired roll setpoint
  */
-LOG_ADD(LOG_FLOAT, roll, NULL)
+LOG_ADD(LOG_FLOAT, roll, &attitudeDesired.roll)
 /**
  * @brief Desired pitch setpoint
  */
-LOG_ADD(LOG_FLOAT, pitch, NULL)
+LOG_ADD(LOG_FLOAT, pitch, &attitudeDesired.pitch)
 /**
  * @brief Desired yaw setpoint
  */
-LOG_ADD(LOG_FLOAT, yaw, NULL)
+LOG_ADD(LOG_FLOAT, yaw, &attitudeDesired.yaw)
 /**
  * @brief Desired roll rate setpoint
  */
-LOG_ADD(LOG_FLOAT, rollRate, NULL)
+LOG_ADD(LOG_FLOAT, rollRate, &rateDesired.roll)
 /**
  * @brief Desired pitch rate setpoint
  */
-LOG_ADD(LOG_FLOAT, pitchRate, NULL)
+LOG_ADD(LOG_FLOAT, pitchRate, &rateDesired.pitch)
 /**
  * @brief Desired yaw rate setpoint
  */
-LOG_ADD(LOG_FLOAT, yawRate, NULL)
+LOG_ADD(LOG_FLOAT, yawRate, &rateDesired.yaw)
 
 LOG_GROUP_STOP(ctrlStdnt)
 
@@ -227,8 +257,6 @@ LOG_GROUP_STOP(Test_Stand)
  */
 PARAM_GROUP_START(ctrlStdnt)
 
-//488 TODO optionally add any parameters to modify the controller code while running
-
-PARAM_ADD(PARAM_FLOAT, placeHolder, NULL)
+PARAM_ADD(PARAM_FLOAT, placeHolder, &angle)
 
 PARAM_GROUP_STOP(ctrlStdnt)
